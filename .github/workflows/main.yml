@@ -1,155 +1,69 @@
-name: Windows RDP
-
-on:
-  workflow_dispatch:
-
 jobs:
   rdp:
     runs-on: windows-latest
+    timeout-minutes: 350
 
     steps:
-
-      # =========================
-      # CHECK WINDOWS
-      # =========================
-      - name: Check Windows
+      - name: Setup RDP
         shell: powershell
         run: |
-          Write-Host "=== WINDOWS INFO ==="
+          $Password = "DanzK3ce!2026Rdp"
+          $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
 
-          Get-ComputerInfo |
-            Select-Object WindowsProductName, WindowsVersion, OsArchitecture
+          Set-LocalUser -Name "runneradmin" -Password $SecurePassword
 
-
-      # =========================
-      # INSTALL TAILSCALE
-      # =========================
-      - name: Install Tailscale
-        shell: powershell
-        run: |
-          $msi = "$env:TEMP\tailscale.msi"
-
-          Invoke-WebRequest `
-            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
-            -OutFile $msi
-
-          Start-Process msiexec.exe `
-            -ArgumentList "/i `"$msi`" /quiet /norestart" `
-            -Wait
-
-          Write-Host "Tailscale installed."
-
-
-      # =========================
-      # CONNECT TAILSCALE
-      # =========================
-      - name: Connect Tailscale
-        shell: powershell
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
-        run: |
-          $ts = "C:\Program Files\Tailscale\tailscale.exe"
-
-          if (-not (Test-Path $ts)) {
-            throw "Tailscale tidak ditemukan."
-          }
-
-          & $ts up `
-            --auth-key="$env:TAILSCALE_AUTH_KEY" `
-            --hostname="github-rdp"
-
-          Start-Sleep -Seconds 5
-
-          Write-Host "=== TAILSCALE STATUS ==="
-          & $ts status
-
-
-      # =========================
-      # ENABLE RDP
-      # =========================
-      - name: Enable RDP
-        shell: powershell
-        run: |
           Set-ItemProperty `
             -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Value 0
 
-          Set-ItemProperty `
-            -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
-            -Name "UserAuthentication" `
-            -Value 1
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop"
+          Restart-Service TermService -Force
 
-          Write-Host "RDP enabled."
+          Write-Host "RDP configured."
 
-
-      # =========================
-      # SET RDP PASSWORD
-      # =========================
-      - name: Set RDP Password
+      - name: Install Tailscale
         shell: powershell
         run: |
-          $password = ConvertTo-SecureString `
-            "DanzK3ce!2026Rdp" `
-            -AsPlainText `
-            -Force
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          Invoke-WebRequest $url -OutFile "$env:TEMP\tailscale.msi"
+          Start-Process msiexec.exe `
+            -ArgumentList "/i `"$env:TEMP\tailscale.msi`" /quiet /norestart" `
+            -Wait
 
-          Set-LocalUser `
-            -Name "runneradmin" `
-            -Password $password
-
-          Write-Host "RDP password configured."
-
-
-      # =========================
-      # TEST RDP
-      # =========================
-      - name: Test RDP
+      - name: Connect Tailscale
         shell: powershell
+        env:
+          TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          Start-Sleep -Seconds 3
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey="$env:TS_AUTH_KEY" `
+            --hostname="github-rdp"
 
-          $result = Test-NetConnection `
-            -ComputerName "127.0.0.1" `
-            -Port 3389
+          Start-Sleep -Seconds 5
 
-          Write-Host "RDP 3389: $($result.TcpTestSucceeded)"
+          $ip = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
 
-          if (-not $result.TcpTestSucceeded) {
-            throw "Port RDP 3389 tidak terbuka."
-          }
-
-
-      # =========================
-      # SHOW CONNECTION INFO
-      # =========================
-      - name: RDP Information
-        shell: powershell
-        run: |
-          $ts = "C:\Program Files\Tailscale\tailscale.exe"
-          $ip = (& $ts ip -4).Trim()
-
-          Write-Host ""
-          Write-Host "======================================"
+          Write-Host "===================================="
           Write-Host "             RDP READY"
-          Write-Host "======================================"
+          Write-Host "===================================="
           Write-Host "PC NAME  : $ip"
           Write-Host "USERNAME : runneradmin"
           Write-Host "PORT     : 3389"
-          Write-Host "======================================"
-          Write-Host ""
+          Write-Host "===================================="
 
-
-      # =========================
-      # KEEP ALIVE
-      # =========================
-      - name: Keep Alive
+      - name: Verify RDP
         shell: powershell
         run: |
+          Test-NetConnection localhost -Port 3389
+
+      - name: Keep Job Alive
+        shell: powershell
+        run: |
+          Write-Host "Session active."
+
           while ($true) {
-            Write-Host "RDP ACTIVE - $(Get-Date)"
-            Start-Sleep -Seconds 60
+              Write-Host "RDP ACTIVE - $(Get-Date)"
+              Start-Sleep -Seconds 60
           }
