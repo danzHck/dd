@@ -9,23 +9,28 @@ jobs:
 
     steps:
 
-      - name: Check Windows
-        shell: powershell
-        run: |
-          Write-Host "OS:"
-          Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion
-
+      # =========================
+      # INSTALL TAILSCALE
+      # =========================
       - name: Install Tailscale
         shell: powershell
         run: |
+          $msi = "$env:TEMP\tailscale.msi"
+
           Invoke-WebRequest `
-            "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
-            -OutFile "$env:TEMP\tailscale.msi"
+            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
+            -OutFile $msi
 
           Start-Process msiexec.exe `
-            -ArgumentList "/i `"$env:TEMP\tailscale.msi`" /quiet /norestart" `
+            -ArgumentList "/i `"$msi`" /quiet /norestart" `
             -Wait
 
+          Write-Host "Tailscale installed."
+
+
+      # =========================
+      # CONNECT TAILSCALE
+      # =========================
       - name: Connect Tailscale
         shell: powershell
         env:
@@ -37,6 +42,14 @@ jobs:
             --auth-key="$env:TAILSCALE_AUTH_KEY" `
             --hostname="github-rdp"
 
+          Start-Sleep -Seconds 5
+
+          & $ts status
+
+
+      # =========================
+      # ENABLE RDP
+      # =========================
       - name: Enable RDP
         shell: powershell
         run: |
@@ -53,24 +66,60 @@ jobs:
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop"
 
-      - name: Show Tailscale IP
+          Restart-Service TermService -Force
+
+
+      # =========================
+      # SET PASSWORD
+      # =========================
+      - name: Set RDP Password
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          $password = ConvertTo-SecureString `
+            "$env:RDP_PASSWORD" `
+            -AsPlainText `
+            -Force
+
+          Set-LocalUser `
+            -Name "runneradmin" `
+            -Password $password
+
+
+      # =========================
+      # SHOW CONNECTION INFO
+      # =========================
+      - name: RDP Information
         shell: powershell
         run: |
           $ts = "C:\Program Files\Tailscale\tailscale.exe"
 
-          Write-Host "=============================="
-          Write-Host "TAILSCALE IP"
-          Write-Host "=============================="
-
-          & $ts ip -4
+          $ip = (& $ts ip -4).Trim()
 
           Write-Host ""
-          Write-Host "RDP PORT: 3389"
+          Write-Host "======================================"
+          Write-Host "          RDP READY"
+          Write-Host "======================================"
+          Write-Host "PC NAME  : $ip"
+          Write-Host "USERNAME : runneradmin"
+          Write-Host "PASSWORD : RDP_PASSWORD SECRET"
+          Write-Host "PORT     : 3389"
+          Write-Host "======================================"
+          Write-Host ""
 
+          Test-NetConnection `
+            -ComputerName "localhost" `
+            -Port 3389
+
+
+      # =========================
+      # KEEP RUNNING
+      # =========================
       - name: Keep Alive
         shell: powershell
         run: |
           while ($true) {
-            Write-Host "RDP RUNNING..."
+            Write-Host "RDP ACTIVE - $(Get-Date)"
             Start-Sleep -Seconds 60
           }
