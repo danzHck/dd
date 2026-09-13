@@ -1,0 +1,111 @@
+name: Windows 11 RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp:
+    runs-on: self-hosted
+
+    steps:
+
+    # =========================
+    # INSTALL TAILSCALE
+    # =========================
+    - name: Install Tailscale
+      shell: powershell
+      run: |
+        $installer = "$env:TEMP\tailscale.msi"
+
+        Invoke-WebRequest `
+          -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" `
+          -OutFile $installer
+
+        Start-Process msiexec.exe `
+          -ArgumentList "/i `"$installer`" /quiet /norestart" `
+          -Wait
+
+
+    # =========================
+    # CONNECT TAILSCALE
+    # =========================
+    - name: Connect Tailscale
+      shell: powershell
+      env:
+        TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      run: |
+        $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
+
+        & $tailscale up `
+          --auth-key="$env:TAILSCALE_AUTH_KEY" `
+          --hostname="windows-11-rdp"
+
+
+    # =========================
+    # ENABLE WINDOWS RDP
+    # =========================
+    - name: Enable RDP
+      shell: powershell
+      run: |
+        Set-ItemProperty `
+          -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+          -Name "fDenyTSConnections" `
+          -Value 0
+
+        Set-ItemProperty `
+          -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+          -Name "UserAuthentication" `
+          -Value 1
+
+        Enable-NetFirewallRule `
+          -DisplayGroup "Remote Desktop"
+
+
+    # =========================
+    # SET RDP PASSWORD
+    # =========================
+    - name: Set RDP Password
+      shell: powershell
+      env:
+        RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+      run: |
+        $securePassword = ConvertTo-SecureString `
+          $env:RDP_PASSWORD `
+          -AsPlainText `
+          -Force
+
+        Set-LocalUser `
+          -Name $env:USERNAME `
+          -Password $securePassword
+
+
+    # =========================
+    # DISPLAY CONNECTION INFO
+    # =========================
+    - name: Show RDP Information
+      shell: powershell
+      run: |
+        $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
+        $ip = & $tailscale ip -4
+
+        Write-Host ""
+        Write-Host "================================"
+        Write-Host "       WINDOWS 11 RDP READY"
+        Write-Host "================================"
+        Write-Host "Tailscale IP : $ip"
+        Write-Host "Username     : $env:USERNAME"
+        Write-Host "RDP Port     : 3389"
+        Write-Host "================================"
+        Write-Host ""
+
+
+    # =========================
+    # KEEP RUNNER ALIVE
+    # =========================
+    - name: Keep Alive
+      shell: powershell
+      run: |
+        while ($true) {
+          Write-Host "Windows 11 RDP is running..."
+          Start-Sleep -Seconds 60
+        }
