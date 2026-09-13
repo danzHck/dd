@@ -10,6 +10,18 @@ jobs:
     steps:
 
       # =========================
+      # CHECK WINDOWS
+      # =========================
+      - name: Check Windows
+        shell: powershell
+        run: |
+          Write-Host "=== WINDOWS INFO ==="
+
+          Get-ComputerInfo |
+            Select-Object WindowsProductName, WindowsVersion, OsArchitecture
+
+
+      # =========================
       # INSTALL TAILSCALE
       # =========================
       - name: Install Tailscale
@@ -44,6 +56,7 @@ jobs:
 
           Start-Sleep -Seconds 5
 
+          Write-Host "=== TAILSCALE STATUS ==="
           & $ts status
 
 
@@ -66,19 +79,17 @@ jobs:
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop"
 
-          Restart-Service TermService -Force
+          Write-Host "RDP enabled."
 
 
       # =========================
-      # SET PASSWORD
+      # SET RDP PASSWORD
       # =========================
       - name: Set RDP Password
         shell: powershell
-        env:
-          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           $password = ConvertTo-SecureString `
-            "$env:RDP_PASSWORD" `
+            "danzkece" `
             -AsPlainText `
             -Force
 
@@ -86,39 +97,57 @@ jobs:
             -Name "runneradmin" `
             -Password $password
 
+          Write-Host "RDP password configured."
+
 
       # =========================
-      # SHOW CONNECTION INFO
+      # TEST RDP
+      # =========================
+      - name: Test RDP
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 3
+
+          $test = Test-NetConnection `
+            -ComputerName "127.0.0.1" `
+            -Port 3389
+
+          Write-Host "RDP Port 3389: $($test.TcpTestSucceeded)"
+
+          if (-not $test.TcpTestSucceeded) {
+            throw "RDP port 3389 tidak terbuka."
+          }
+
+
+      # =========================
+      # SHOW RDP INFORMATION
       # =========================
       - name: RDP Information
         shell: powershell
         run: |
           $ts = "C:\Program Files\Tailscale\tailscale.exe"
-
           $ip = (& $ts ip -4).Trim()
 
           Write-Host ""
           Write-Host "======================================"
-          Write-Host "          RDP READY"
+          Write-Host "            RDP READY"
           Write-Host "======================================"
           Write-Host "PC NAME  : $ip"
           Write-Host "USERNAME : runneradmin"
-          Write-Host "PASSWORD : RDP_PASSWORD SECRET"
+          Write-Host "PASSWORD : danzkece"
           Write-Host "PORT     : 3389"
           Write-Host "======================================"
           Write-Host ""
 
-          Test-NetConnection `
-            -ComputerName "localhost" `
-            -Port 3389
-
 
       # =========================
-      # KEEP RUNNING
+      # KEEP ALIVE
       # =========================
       - name: Keep Alive
         shell: powershell
         run: |
+          Write-Host "RDP ACTIVE..."
+
           while ($true) {
             Write-Host "RDP ACTIVE - $(Get-Date)"
             Start-Sleep -Seconds 60
